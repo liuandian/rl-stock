@@ -1,0 +1,20 @@
+# data handling
+numpy
+pandas>=1.1.5
+stockstats
+tushare
+quantstats
+
+# plot
+matplotlib
+
+# model building requirements
+
+stable-baselines3[extra]==1.2.0
+
+# testing requirements
+pytest
+
+# packaging
+setuptools>=41.4.0
+wheel>=0.33.6
