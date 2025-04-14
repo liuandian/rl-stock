@@ -110,6 +110,13 @@ action = [-0.5, 0.8, -1.0]
 ```
 * 正数表示买入，负数表示卖出，0 表示不进行买入卖出操作
 
+## 除此之外，还设置了对独立的股票进行RL学习的环境
+
+```shell
+cd single_learn/
+python single_main.py --stock sh.600036 -m ppo -tts 100000 
+```
+<img src="./assets/single_stock.jpg" width="800" height="300" />
 
 ## Reference
 
