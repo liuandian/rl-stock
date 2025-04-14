@@ -1,34 +1,37 @@
-# -*- coding: utf-8 -*-
+from typing import Any, List, Tuple
+import numpy as np
+import pandas as pd
+import random
+from copy import deepcopy
+import gymnasium as gym      # 强化学习环境库
+from gymnasium import spaces # 环境空间定义
+import time
 
-'''
-强化学习交易环境
-
-该模块实现了一个基于gymnasium的强化学习交易环境，用于股票交易的模拟和训练。
-主要功能包括：
-1. 模拟股票交易环境，包括买入、卖出操作和手续费计算
-2. 提供状态表示、动作执行和奖励计算
-3. 支持向量化环境，用于并行训练
-4. 提供交易记录和性能评估
-'''
-
-# 导入必要的库
-from typing import Any, List, Tuple  # 类型提示
-import numpy as np                   # 数值计算
-import pandas as pd                  # 数据处理
-import random                        # 随机数生成
-from copy import deepcopy            # 深拷贝
-import gymnasium as gym              # 强化学习环境库
-from gymnasium import spaces         # 环境空间定义
-import time                          # 时间处理
-
-# 导入向量化环境工具
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 class StockLearningEnv(gym.Env):
-    """构建强化学习交易环境
+    """构建强化学习交易环境 (Environment)
 
     该类实现了一个基于gymnasium的强化学习交易环境，用于股票交易的模拟和训练。
     环境支持多只股票的交易，考虑了交易手续费，并提供了灵活的状态表示和奖励计算。
+
+    在强化学习中，环境(Environment)是智能体(Agent)与之交互的外部系统。
+    在这个股票交易环境中，智能体通过观察市场状态，执行买卖操作，并获得相应的奖励。
+    环境负责根据智能体的动作更新状态，并提供反馈（奖励）。
+
+    奖励函数 (Reward Function):
+    奖励函数由三部分组成：
+    1. 对数收益率 (Log Return)：使用对数收益率代替简单收益率，更符合金融理论
+       - 计算公式：log(assets / initial_amount)
+       - 对数收益率在连续复利情况下更准确，且可以更好地处理不同时间尺度的收益
+
+    2. 回撤惩罚 (Drawdown Penalty)：惩罚资产价值从历史最高点的下跌
+       - 计算公式：log(assets / max_total_assets)（这是一个负值或0）
+       - 这鼓励智能体避免大幅度的资产回撤，追求稳定增长
+
+    3. 交易成本惩罚 (Transaction Cost Penalty)：惩罚过度交易
+       - 计算公式：-交易量 * 交易成本系数
+       - 这鼓励智能体减少不必要的交易，避免过度交易导致的成本损失
 
     Attributes:
         df (pd.DataFrame): 构建环境时所需要用到的行情数据，包含日期、股票代码、价格等信息
@@ -45,7 +48,7 @@ class StockLearningEnv(gym.Env):
         currency (str): 货币单位，用于显示
     """
 
-    metadata = {"render_modes": ["human"]}  # gymnasium中使用render_modes替代render.modes
+    metadata = {"render.modes": ["human"]}
     def __init__(
         self,
         df: pd.DataFrame,
@@ -61,23 +64,6 @@ class StockLearningEnv(gym.Env):
         patient: bool = False,
         currency: str = "￥"
     ) -> None:
-        """
-        初始化交易环境
-
-        Args:
-            df: 包含股票数据的DataFrame，必须包含date_col_name和stock_col列
-            buy_cost_pct: 买入股票时的手续费比例，默认为0.3%
-            sell_cost_pct: 卖出股票时的手续费比例，默认为0.3%
-            date_col_name: 日期列的名称，默认为"date"
-            hmax: 单次交易最大可交易的数量，默认为10
-            print_verbosity: 打印信息的频率，默认为每10步打印一次
-            initial_amount: 初始资金量，默认为1,000,000
-            daily_information_cols: 构建状态时所考虑的列，默认为["open", "close", "high", "low", "volume"]
-            cache_indicator_data: 是否预先加载数据到内存，默认为True
-            random_start: 是否随机位置开始交易，默认为True
-            patient: 是否在资金不够时不执行交易操作，默认为False
-            currency: 货币单位，默认为"￥"
-        """
         self.df = df
         self.stock_col = "tic"
         self.assets = df[self.stock_col].unique()
@@ -118,67 +104,33 @@ class StockLearningEnv(gym.Env):
             print("数据缓存成功!")
 
     def seed(self, seed: Any = None) -> None:
-        """
-        设置随机种子，确保实验可重复性
-
-        Args:
-            seed: 随机种子，如果为None则使用当前时间戳作为种子
-        """
+        """设置随机种子"""
         if seed is None:
             seed = int(round(time.time() * 1000))
         random.seed(seed)
 
     @property
     def current_step(self) -> int:
-        """
-        当前回合的运行步数
-
-        Returns:
-            int: 当前回合已经执行的步数
-        """
+        """当前回合的运行步数"""
         return self.date_index - self.starting_point
 
     @property
     def cash_on_hand(self) -> float:
-        """
-        当前拥有的现金
-
-        Returns:
-            float: 当前账户中的现金数量
-        """
+        """当前拥有的现金"""
         return self.state_memory[-1][0]
 
     @property
     def holdings(self) -> List:
-        """
-        当前的持仓数据
-
-        Returns:
-            List: 当前持有的每只股票的数量列表
-        """
+        """当前的持仓数据"""
         return self.state_memory[-1][1: len(self.assets) + 1]
 
     @property
     def closings(self) -> List:
-        """
-        每支股票当前的收盘价
-
-        Returns:
-            List: 当前日期每只股票的收盘价列表
-        """
+        """每支股票当前的收盘价"""
         return np.array(self.get_date_vector(self.date_index, cols=["close"]))
 
     def get_date_vector(self, date: int, cols: List = None) -> List:
-        """
-        获取指定日期的行情数据
-
-        Args:
-            date: 日期索引，对应self.dates中的索引
-            cols: 需要获取的列名列表，如果为None则使用self.daily_information_cols
-
-        Returns:
-            List: 指定日期所有股票的行情数据，按股票和列名展平
-        """
+        """获取 date 那天的行情数据"""
         if(cols is None) and (self.cached_data is not None):
             return self.cached_data[date]
         else:
@@ -194,63 +146,33 @@ class StockLearningEnv(gym.Env):
             return res
 
     def reset(self, *, seed=None, options=None) -> tuple:
-        """
-        重置环境到初始状态
-
-        该方法在每个回合开始时调用，重置环境状态，包括现金、持仓、日期等。
-        如果random_start为True，则会随机选择一个开始日期。
-
-        Args:
-            seed: 随机种子，用于确保实验可重复性
-            options: 其他重置选项，目前未使用
-
-        Returns:
-            tuple: (初始状态, 信息字典)
-        """
-        # 调用父类的reset方法，设置随机种子
         super().reset(seed=seed, options=options)
         self.seed(seed)
-
-        # 重置交易相关变量
-        self.sum_trades = 0  # 总交易次数
-        self.max_total_assets = self.initial_amount  # 最大资产价值，用于计算回撤
-
-        # 设置起始日期
+        self.sum_trades = 0
+        self.max_total_assets = self.initial_amount
         if self.random_start:
-            # 随机选择前半段数据作为起始点（用于训练）
             self.starting_point = random.choice(range(int(len(self.dates) * 0.5)))
         else:
-            # 从第一天开始（用于回测）
             self.starting_point = 0
         self.date_index = self.starting_point
-
-        # 重置其他状态变量
-        self.turbulence = 0  # 市场波动指标
-        self.episode += 1    # 回合计数器
-
-        # 重置记忆数组
-        self.actions_memory = []      # 动作历史
-        self.transaction_memory = []  # 交易历史
-        self.state_memory = []        # 状态历史
-
-        # 重置账户信息
+        self.turbulence = 0
+        self.episode += 1
+        self.actions_memory = []
+        self.transaction_memory = []
+        self.state_memory = []
         self.account_information = {
-            "cash": [],          # 现金历史
-            "asset_value": [],   # 资产价值历史
-            "total_assets": [],  # 总资产历史
-            "reward": []         # 奖励历史
+            "cash": [],
+            "asset_value": [],
+            "total_assets": [],
+            "reward": []
         }
-
-        # 创建初始状态：[现金, 持仓1, 持仓2, ..., 技术指标1, 技术指标2, ...]
         init_state = np.array(
-            [self.initial_amount]  # 初始现金
-            + [0] * len(self.assets)  # 初始持仓全为0
-            + self.get_date_vector(self.date_index)  # 初始日期的技术指标
+            [self.initial_amount]
+            + [0] * len(self.assets)
+            + self.get_date_vector(self.date_index)
         )
         self.state_memory.append(init_state)
-
-        # 返回初始状态和空的信息字典
-        return init_state, {}
+        return init_state, {}  # 返回初始状态和空的info字典
 
     def log_step(
         self, reason: str, terminal_reward: float=None
@@ -265,21 +187,50 @@ class StockLearningEnv(gym.Env):
         if terminal_reward is None:
             terminal_reward = self.account_information["reward"][-1]
 
+        # 获取当前资产信息
         assets = self.account_information["total_assets"][-1]
+        cash = self.account_information["cash"][-1]
+
+        # 计算回撤百分比
         tmp_retreat_ptc = assets / self.max_total_assets - 1
         retreat_pct = tmp_retreat_ptc if assets < self.max_total_assets else 0
-        gl_pct = self.account_information["total_assets"][-1] / self.initial_amount
 
+        # 计算总盈亏百分比
+        gl_pct = assets / self.initial_amount - 1
+
+        prev_assets = self.account_information["total_assets"][-2]
+        
+        # 计算交易成本
+        # 如果有交易记录，计算最近一次交易的成本
+        if len(self.transaction_memory) > 0:
+            recent_transactions = np.abs(self.transaction_memory[-1])
+            transaction_volume = np.sum(recent_transactions * self.closings)
+            avg_cost_pct = (self.buy_cost_pct + self.sell_cost_pct) / 2
+            transaction_cost = transaction_volume * avg_cost_pct 
+        else:
+            transaction_cost = 0
+
+        # 计算变化率（当前资产相对于上一步的变化）
+        if len(self.account_information["total_assets"]) > 1:
+            change_pct = np.log(assets / prev_assets)
+        else:
+            change_pct = 0
+
+        # 创建记录数组
         rec = [
-            self.episode,
-            self.date_index - self.starting_point,
-            reason,
-            f"{self.currency}{'{:0,.0f}'.format(float(self.account_information['cash'][-1]))}",
-            f"{self.currency}{'{:0,.0f}'.format(float(assets))}",
-            f"{terminal_reward*100:0.5f}%",
-            f"{(gl_pct - 1)*100:0.5f}%",
-            f"{retreat_pct*100:0.2f}%"
+            self.episode,                                                      # 回合数
+            self.date_index - self.starting_point,                             # 步数
+            reason,                                                            # 原因
+            f"{self.currency}{'{:0,.0f}'.format(float(cash))}",                 # 现金
+            f"{self.currency}{'{:0,.0f}'.format(float(assets))}",               # 总资产
+            f"{terminal_reward*100:0.2f}%",                                    # 奖励
+            f"{change_pct*100:0.2f}%",                                         # 变化率
+            f"{retreat_pct*100:0.2f}%",                                        # 回撤率
+            f"{self.currency}{'{:0,.0f}'.format(float(transaction_cost))}",    # 交易成本
+            f"{gl_pct*100:0.2f}%"                                              # 总盈亏百分比
         ]
+
+        # 保存记录并打印
         self.episode_history.append(rec)
         print(self.template.format(*rec))
 
@@ -320,30 +271,44 @@ class StockLearningEnv(gym.Env):
         在第一次调用log_step之前打印表头，包括回合、步数、终止原因等列名。
         """
         if not self.printed_header:
-            self.template = "{0:4}|{1:4}|{2:15}|{3:15}|{4:15}|{5:10}|{6:10}|{7:10}"
+            # 修改模板以包含10个元素
+            self.template = "{0:4}|{1:4}|{2:12}|{3:12}|{4:12}|{5:8}|{6:8}|{7:8}|{8:8}|{9:8}"
             # 0, 1, 2, ... 是序号
-            # 4, 4, 15, ... 是占位格的大小
+            # 4, 4, 12, ... 是占位格的大小
             print(
                 self.template.format(
-                    "EPISODE",
-                    "STEPS",
-                    "TERMINAL_REASON",
-                    "CASH",
-                    "TOT_ASSETS",
-                    "TERMINAL_REWARD",
-                    "GAINLOSS_PCT",
-                    "RETREAT_PROPORTION"
+                    "Ep",       # 回合数
+                    "Step",     # 步数
+                    "Reason",    # 终止原因
+                    "Cash",      # 现金
+                    "Total",     # 总资产
+                    "Reward",    # 奖励
+                    "Change",    # 变化率
+                    "Retreat",   # 回撤率
+                    "Cost",      # 交易成本
+                    "GainLoss"   # 盈亏百分比
                 )
             )
             self.printed_header = True
 
     def get_reward(self) -> float:
         """
-        计算当前步骤的奖励值
+        计算当前步骤的奖励值 (Reward Function)
 
-        奖励由两部分组成：
-        1. 总资产相对于初始资金的收益率
-        2. 当前资产相对于历史最高资产的回撤惩罚
+        奖励函数由三部分组成：
+        1. 对数收益率 (Log Return)：使用对数收益率代替简单收益率，更符合金融理论
+           - 计算公式：log(当前资产 / 上一时刻资产)
+           - 对数收益率在连续复利情况下更准确，且可以更好地处理不同时间尺度的收益
+
+        2. 回撤惩罚 (Drawdown Penalty)：惩罚资产价值从历史最高点的下跌
+           - 计算公式：(assets / self.max_total_assets) - 1（这是一个负值或0）
+           - 这鼓励智能体避免大幅度的资产回撤，追求稳定增长
+
+        3. 交易成本惩罚 (Transaction Cost Penalty)：惩罚过度交易
+           - 计算公式：-交易量 * 交易成本系数
+           - 这鼓励智能体减少不必要的交易，避免过度交易导致的成本损失
+
+        总奖励 = 对数收益率 + 回撤惩罚权重 * 回撤惩罚 + 交易成本权重 * 交易成本惩罚
 
         Returns:
             float: 计算得到的奖励值
@@ -351,52 +316,109 @@ class StockLearningEnv(gym.Env):
         if self.current_step == 0:
             return 0
         else:
+            # 获取当前总资产价值
             assets = self.account_information["total_assets"][-1]
-            retreat = 0
+
+            # 1. 计算对数收益率 (Log Return)
+            # 使用对数收益率代替简单收益率，更符合金融理论
+            # 获取上一时刻的资产价值，如果是第一步，则使用初始资金
+            if len(self.account_information["total_assets"]) > 1:
+                prev_assets = self.account_information["total_assets"][-2]
+            else:
+                prev_assets = self.initial_amount
+
+            # 计算对数收益率：log(当前资产 / 上一时刻资产)
+            log_return = np.log(assets / prev_assets)
+
+            # 2. 计算回撤惩罚 (Drawdown Penalty)
+            # 更新历史最大资产价值
             if assets >= self.max_total_assets:
                 self.max_total_assets = assets
+                drawdown_penalty = 0  # 如果创新高，没有回撤
             else:
-                retreat = assets / self.max_total_assets - 1
-            reward = assets / self.initial_amount - 1
-            reward += retreat
+                # 使用对数比例计算回撤
+                drawdown_penalty = (assets / self.max_total_assets) - 1  # 这是一个负值
+
+            # 3. 计算交易成本惩罚 (Transaction Cost Penalty)
+            # 如果是第一步，没有交易成本
+            if len(self.transaction_memory) == 0:
+                transaction_cost_penalty = 0
+            else:
+                # 获取最近一次交易的绝对值总和（交易量）
+                recent_transactions = np.abs(self.transaction_memory[-1])
+                transaction_volume = np.sum(recent_transactions * self.closings)
+
+                # 交易成本惩罚与交易量和成本比例成正比
+                avg_cost_pct = (self.buy_cost_pct + self.sell_cost_pct) / 2
+                transaction_cost_penalty = -transaction_volume * avg_cost_pct / prev_assets
+
+            # 设置权重系数
+            drawdown_weight = 0.1  # 回撤惩罚权重
+            transaction_cost_weight = 1.0  # 交易成本惩罚权重
+
+            # 计算总奖励
+            reward = log_return + drawdown_weight * drawdown_penalty + transaction_cost_weight * transaction_cost_penalty
+
             return reward
 
     def get_transactions(self, actions: np.ndarray) -> np.ndarray:
         """
-        根据动作计算实际交易的股数
+        根据动作计算实际交易的股数 (Action到Transaction的转换)
 
-        将模型输出的动作转换为实际交易的股票数量，考虑了最大交易限制和当前持仓限制。
+        这个函数实现了从智能体的抽象动作到具体交易指令的转换。
+        在强化学习中，动作空间通常是标准化的（如[-1,1]范围），
+        需要将其转换为实际环境中的操作（如具体买卖多少股）。
+
+        这个转换过程也与奖励函数中的交易成本惩罚相关。在奖励函数中，
+        我们使用交易量（股数 * 价格）和交易成本比例来计算交易成本惩罚，
+        从而鼓励智能体减少不必要的交易。
 
         Args:
             actions: 模型输出的动作，范围为[-1, 1]，表示买卖的比例
+                    -1表示卖出最大允许数量
+                    1表示买入最大允许数量
+                    0表示不交易
 
         Returns:
             np.ndarray: 实际交易的股票数量，正数表示买入，负数表示卖出
         """
+        # 记录原始动作
         self.actions_memory.append(actions)
+
+        # 将动作比例转换为交易金额
+        # 例如：如果action=0.5且hmax=10，则交易金额为5
         actions = actions * self.hmax
 
-        # 收盘价为 0 的不进行交易
+        # 收盘价为0的股票不进行交易（避免除以0的错误）
         actions = np.where(self.closings > 0, actions, 0)
 
-        # 去除被除数为 0 的警告
+        # 将交易金额转换为股票数量（金额/价格=数量）
+        # 同时处理除以0的情况
         out = np.zeros_like(actions)
         zero_or_not = self.closings != 0
-        actions = np.divide(actions, self.closings, out=out, where = zero_or_not)
+        actions = np.divide(actions, self.closings, out=out, where=zero_or_not)
 
-        # 不能卖的比持仓的多
+        # 卖出限制：不能卖出超过当前持有的股票数量
         actions = np.maximum(actions, -np.array(self.holdings))
 
-        # 将 -0 的值全部置为 0
+        # 将-0的值全部置为0（避免符号问题）
         actions[actions == -0] = 0
 
         return actions
 
     def step(self, actions: np.ndarray) -> Tuple[List, float, bool, bool, dict]:
         """
-        执行一步交易
+        执行一步交易 (Environment Step Function)
 
-        根据给定的动作执行一步交易，更新环境状态，并返回新状态、奖励和是否终止的信息。
+        这是强化学习环境中的核心函数，实现了环境的状态转移。
+        每次调用step函数，环境会根据智能体提供的动作执行一步交易，
+        然后返回新的状态、奖励和是否终止的信息。
+
+        在强化学习的MDP（马尔可夫决策过程）框架中，step函数实现了从
+        当前状态s和动作a到下一状态s'的转移，并计算即时奖励r。
+
+        这个函数与奖励函数密切相关，它计算交易成本并更新账户状态，
+        这些信息随后被奖励函数用于计算对数收益率、回撤惩罚和交易成本惩罚。
 
         Args:
             actions: 模型输出的动作，范围为[-1, 1]，表示买卖的比例
@@ -404,13 +426,16 @@ class StockLearningEnv(gym.Env):
         Returns:
             Tuple: (新状态, 奖励, 终止标志, 截断标志, 信息字典)
         """
+        # 累计交易量统计，用于计算交易成本惩罚
         self.sum_trades += np.sum(np.abs(actions))
+
+        # 打印日志头（如果需要）
         self.log_header()
         if(self.current_step + 1) % self.print_verbosity == 0:
             self.log_step(reason="update")
         if self.date_index == len(self.dates) - 1:
-            state, reward, terminated, info = self.return_terminal(reward=self.get_reward())
-            return state, reward, terminated, False, info
+            # 直接返回终止状态的结果，包含5个值（状态、奖励、终止标志、截断标志、信息字典）
+            return self.return_terminal(reward=self.get_reward())
         else:
             begin_cash = self.cash_on_hand
             assert min(self.holdings) >= 0
@@ -438,6 +463,7 @@ class StockLearningEnv(gym.Env):
                     spend = 0
                     costs = 0
                 else:
+                    # 资金不足时终止环境
                     return self.return_terminal(
                         reason="CASH SHORTAGE", reward=self.get_reward()
                     )
@@ -453,86 +479,40 @@ class StockLearningEnv(gym.Env):
             return state, reward, False, False, {}
 
     def get_sb_env(self) -> Tuple[Any, Any]:
-        """
-        获取stable-baselines3兼容的向量化环境
-
-        创建一个DummyVecEnv包装的环境，用于stable-baselines3库的训练。
-
-        Returns:
-            Tuple: (向量化环境, 初始观察)
-        """
         def get_self():
             return deepcopy(self)
 
         e = DummyVecEnv([get_self])
-        reset_result = e.reset()
-        # 处理不同版本的reset返回格式
-        if isinstance(reset_result, tuple):
-            obs = reset_result[0]
-        else:
-            obs = reset_result
+        obs = e.reset()
         return e, obs
 
     def get_multiproc_env(
         self, n: int = 10
     ) -> Tuple[Any, Any]:
-        """
-        获取多进程向量化环境
-
-        创建一个SubprocVecEnv包装的多进程环境，用于加速训练。
-
-        Args:
-            n: 并行环境的数量，默认为10
-
-        Returns:
-            Tuple: (向量化环境, 初始观察)
-        """
         def get_self():
             return deepcopy(self)
 
         e = SubprocVecEnv([get_self for _ in range(n)], start_method="fork")
-        reset_result = e.reset()
-        # 处理不同版本的reset返回格式
-        if isinstance(reset_result, tuple):
-            obs = reset_result[0]
-        else:
-            obs = reset_result
+        obs = e.reset()
         return e, obs
 
     def save_asset_memory(self) -> pd.DataFrame:
-        """
-        保存账户资产历史记录
-
-        将账户资产历史记录转换为DataFrame格式，包括日期、现金、资产价值等信息。
-
-        Returns:
-            pd.DataFrame: 账户资产历史记录，如果当前步数为0则返回None
-        """
         if self.current_step == 0:
             return None
         else:
-            # 添加日期信息
             self.account_information["date"] = self.dates[
                 -len(self.account_information["cash"]):
             ]
             return pd.DataFrame(self.account_information)
 
     def save_action_memory(self) -> pd.DataFrame:
-        """
-        保存动作和交易历史记录
-
-        将动作和交易历史记录转换为DataFrame格式，包括日期、动作和实际交易数量。
-
-        Returns:
-            pd.DataFrame: 动作和交易历史记录，如果当前步数为0则返回None
-        """
         if self.current_step == 0:
             return None
         else:
             return pd.DataFrame(
                 {
                     "date": self.dates[-len(self.account_information["cash"]):],
-                    "actions": self.actions_memory,        # 模型输出的动作
-                    "transactions": self.transaction_memory # 实际交易的股票数量
+                    "actions": self.actions_memory,
+                    "transactions": self.transaction_memory
                 }
             )
