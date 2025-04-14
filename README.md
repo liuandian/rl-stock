@@ -1,9 +1,9 @@
 ## 效果展示 
-<img src="./assets/result_picture.png" width="800" height="200" />
-<img src="./assets/result.jpg" width="800" height="200" />
+<img src="./assets/result_picture.png" width="500" height="200" />
+<img src="./assets/result.jpg" width="500" height="200" />
 
 ### 算法回测效果，以SAC为例
-<img src="./assets/sac_output.png" width="800" height="200" />
+<img src="./assets/sac_output.png" width="500" height="200" />
 
 ## 快速开始
 conda 创建虚拟环境 python = 3.9
@@ -27,7 +27,7 @@ python stable_sample_test.py
 ```
 
 能出现这个代表gymunasium,stable-baselines3安装成功
-<img src="./assets/test.jpg" width="800" height="200" />
+<img src="./assets/test.jpg" width="300" height="200" />
 
 
 环境安装完成后，进入learn文件夹
