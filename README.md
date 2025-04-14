@@ -26,7 +26,7 @@ pip install -r requirements.txt
 python stable_sample_test.py
 ```
 
-能出现这个代表gymunasium,stable-baselines3安装成功
+能出现这个代表gymnasium,stable-baselines3安装成功
 
 <img src="./assets/test.jpg" width="300" height="200" />
 
