@@ -193,10 +193,6 @@ class Trader(object):
 
         # 打印账户净值数据
         print("查看日账户净值")
-        print("开始: ")
-        print(df_account_value.head())
-        print("")
-        print("结束: ")
         print(df_account_value.tail())
 
         # 打印交易行为数据

@@ -87,5 +87,5 @@ if __name__ == "__main__":
 
     df = Pull_data(config.SSE_50[:2], save_data=False).pull_data()
     df = FeatureEngineer().preprocess_data(df)
-    df = split_data(df, '2009-01-01','2019-01-01')
+    df = split_data(df, '2009-01-01','2025-01-01')
     print(df.head())
